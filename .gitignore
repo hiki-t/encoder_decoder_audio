@@ -29,6 +29,7 @@ Thumbs.db
 
 # ignore trained model
 .tf_model_mnist
+trained_model
 
 # debugging files
 .test

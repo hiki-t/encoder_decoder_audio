@@ -155,7 +155,7 @@ if __name__ == "__main__":
     num_classes = 10
     image_width = 400
     batch_size = 32
-    epochs = 1
+    epochs = 5
 
     ds = load_dataset("danavery/urbansound8K")
 
