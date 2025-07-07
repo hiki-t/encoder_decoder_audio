@@ -237,6 +237,10 @@ if __name__ == "__main__":
         })
         print(f"Epoch {epoch+1}, Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
 
+        print("saving trained model weights")
+        save_model_locally(model, save_dir="./trained_model")
+        push_model_to_hf(save_dir="./trained_model", repo_id="hiki-t/enc_dec_audio")
+
     # Final test evaluation
     test_loss, test_acc = evaluate(model, test_loader, criterion)
     wandb.log({
@@ -245,8 +249,5 @@ if __name__ == "__main__":
     })
     print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
     wandb.finish()
-
-    save_model_locally(model, save_dir="./trained_model")
-    push_model_to_hf(save_dir="./trained_model", repo_id="hiki-t/enc_dec_audio")
 
     print("Proto training complete. Replace dummy data with real audio features for actual use.")
