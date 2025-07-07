@@ -35,3 +35,4 @@ Thumbs.db
 
 # ignore these dir
 myenv
+wandb
