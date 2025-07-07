@@ -4,6 +4,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from datasets import load_dataset
 import wandb
+from huggingface_hub import HfApi, HfFolder, Repository, create_repo, upload_folder, hf_hub_download
+import os
 
 # CNN Model for Audio Classification: Conv1d -> reshape -> Conv2d
 class AudioCNN(nn.Module):
@@ -122,6 +124,29 @@ def collate_fn_pad_to_max(batch, max_len=768_000, pad_left=False):
     audios_tensor = audios_tensor.unsqueeze(1)
     return audios_tensor, labels_tensor
 
+def save_model_locally(model, config, save_dir="./trained_model"):
+    os.makedirs(save_dir, exist_ok=True)
+    # Save decoder model and tokenizer
+    torch.save(model.state_dict(), os.path.join(save_dir, 'audio_cnn_model.pt'))
+    print(f"Model saved locally to {save_dir}")
+
+def push_model_to_hf(save_dir="./trained_model", repo_id="hiki-t/enc_dec_audio", path_in_repo=None):
+    # Create repo if not exist
+    api = HfApi()
+    try:
+        api.create_repo(repo_id, exist_ok=True)
+    except Exception as e:
+        print(f"Repo creation error (may already exist): {e}")
+    # Upload folder
+    upload_folder(
+        repo_id=repo_id,
+        folder_path=save_dir,
+        path_in_repo=path_in_repo,
+        commit_message=f"Upload encoder-decoder model weights and projections from {save_dir} to {path_in_repo if path_in_repo else '/'}",
+        ignore_patterns=["*.tmp", "*.log"]
+    )
+    print(f"Model pushed to Hugging Face Hub: {repo_id} (folder: {save_dir} -> {path_in_repo if path_in_repo else '/'})")
+
 # Example usage (replace with real data loading)
 if __name__ == "__main__":
     # Dummy data: 100 samples, 1 channel, 16000 timesteps (e.g., 1 sec at 16kHz)
@@ -220,4 +245,8 @@ if __name__ == "__main__":
     })
     print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
     wandb.finish()
+
+    save_model_locally(model, config, save_dir="./trained_model")
+    push_model_to_hf(save_dir="./trained_model", repo_id="hiki-t/enc_dec_audio")
+
     print("Proto training complete. Replace dummy data with real audio features for actual use.")
