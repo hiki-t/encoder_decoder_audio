@@ -124,7 +124,7 @@ def collate_fn_pad_to_max(batch, max_len=768_000, pad_left=False):
     audios_tensor = audios_tensor.unsqueeze(1)
     return audios_tensor, labels_tensor
 
-def save_model_locally(model, config, save_dir="./trained_model"):
+def save_model_locally(model, save_dir="./trained_model"):
     os.makedirs(save_dir, exist_ok=True)
     # Save decoder model and tokenizer
     torch.save(model.state_dict(), os.path.join(save_dir, 'audio_cnn_model.pt'))
@@ -246,7 +246,7 @@ if __name__ == "__main__":
     print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
     wandb.finish()
 
-    save_model_locally(model, config, save_dir="./trained_model")
+    save_model_locally(model, save_dir="./trained_model")
     push_model_to_hf(save_dir="./trained_model", repo_id="hiki-t/enc_dec_audio")
 
     print("Proto training complete. Replace dummy data with real audio features for actual use.")
