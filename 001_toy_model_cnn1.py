@@ -72,6 +72,8 @@ def evaluate(model, dataloader, criterion):
     total = 0
     with torch.no_grad():
         for batch_X, batch_y in dataloader:
+            batch_X = batch_X.to(device)
+            batch_y = batch_y.to(device)
             outputs = model(batch_X)
             loss = criterion(outputs, batch_y)
             total_loss += loss.item() * batch_X.size(0)
@@ -147,7 +149,12 @@ if __name__ == "__main__":
     val_loader = DataLoader(AudioClassDataset(val_ds), batch_size=batch_size, shuffle=False, collate_fn=collate_fn_pad_to_max)
     test_loader = DataLoader(AudioClassDataset(test_ds), batch_size=batch_size, shuffle=False, collate_fn=collate_fn_pad_to_max)
 
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     model = AudioCNN(num_classes=num_classes, input_channels=1, time_dim=num_timesteps, image_width=image_width)
+    model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
@@ -172,6 +179,8 @@ if __name__ == "__main__":
         len_train_loader = len(train_loader)
 
         for batch_num, (batch_X, batch_y) in enumerate(train_loader):
+            batch_X = batch_X.to(device)
+            batch_y = batch_y.to(device)
             optimizer.zero_grad()
             outputs = model(batch_X)
             loss = criterion(outputs, batch_y)
