@@ -160,8 +160,8 @@ if __name__ == "__main__":
 
     # Initialize wandb
     wandb.init(
-        project="audio-cnn-urbansound8k", 
-        name="cnn1d2d-proto", 
+        project="enc_dec_from_scratch_audio", 
+        entity="htsujimu-ucl", 
         config={
         "epochs": epochs,
         "batch_size": batch_size,
