@@ -24,19 +24,23 @@ def random_time_shift_torch(audio, shift_max=0.2):
     shift = int(audio.shape[-1] * shift_max * np.random.uniform(-1, 1))
     return torch.roll(audio, shifts=shift, dims=-1)
 
-def random_pitch_shift(audio, sr, n_steps=2):
-    # n_steps: max number of semitones to shift
-    steps = np.random.uniform(-n_steps, n_steps)
-    return librosa.effects.pitch_shift(audio, sr, n_steps=steps)
-
 def add_noise(audio, noise_level=0.005):
     noise = np.random.randn(len(audio))
     augmented = audio + noise_level * noise
     return augmented
 
+def add_noise_torch(audio, noise_level=0.005):
+    noise = torch.randn_like(audio)
+    return audio + noise_level * noise
+
+def random_pitch_shift(audio, sr, n_steps=2):
+    # n_steps: max number of semitones to shift
+    steps = np.random.uniform(-n_steps, n_steps)
+    return librosa.effects.pitch_shift(audio, sr=sr, n_steps=steps)
+
 def random_time_stretch(audio, rate_range=(0.8, 1.2)):
     rate = np.random.uniform(*rate_range)
-    return librosa.effects.time_stretch(audio, rate)
+    return librosa.effects.time_stretch(audio, rate=rate)
 
 # CNN Model for Audio Classification: Conv2d on log-mel spectrogram
 class AudioCNN(nn.Module):
@@ -90,12 +94,21 @@ class AudioClassDataset(Dataset):
         return audio_tensor, label_tensor
 
 class MelSpectrogramDataset(Dataset):
-    def __init__(self, hf_dataset, n_fft=2048, hop_length=512, n_mels=128, train=False):
+    def __init__(self, hf_dataset, sample_rate=16000, n_fft=2048, hop_length=512, n_mels=128, train=False):
         self.hf_dataset = hf_dataset
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.n_mels = n_mels
         self.train = train  # <--- Add this
+        self.sample_rate = sample_rate
+
+        self.mel_transform = torchaudio.transforms.MelSpectrogram(
+            sample_rate=self.sample_rate,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            n_mels=self.n_mels
+        )
+        self.db_transform = torchaudio.transforms.AmplitudeToDB(top_db=80)
 
     def __len__(self):
         return len(self.hf_dataset)
@@ -105,35 +118,55 @@ class MelSpectrogramDataset(Dataset):
         sample_rate = self.hf_dataset[idx]["audio"]["sampling_rate"]
         label = self.hf_dataset[idx]["classID"]
 
+        # Convert to torch tensor first!
+        audio = torch.tensor(audio, dtype=torch.float32)
+
         # Only apply augmentation if training
         if self.train:
             # Randomly choose an augmentation
-            aug_choice = np.random.choice(['shift', 'pitch', 'stretch', 'noise', 'none'])
+            aug_choice = np.random.choice([
+                'shift', 
+                'noise', 
+                'none'
+                ])
             if aug_choice == 'shift':
-                audio = random_time_shift(audio)
-            elif aug_choice == 'pitch':
-                audio = random_pitch_shift(audio, sample_rate)
-            elif aug_choice == 'stretch':
-                audio = random_time_stretch(audio)
+                audio = random_time_shift_torch(audio)
             elif aug_choice == 'noise':
-                audio = add_noise(audio)
+                audio = add_noise_torch(audio)
 
-        # Compute Mel-spectrogram
-        mel_spec = librosa.feature.melspectrogram(
-            y=audio,
-            sr=sample_rate,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            n_mels=self.n_mels
-        )
-        mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
-        # normalize mel data
+        # Add channel dimension for torchaudio (1, N)
+        if audio.dim() == 1:
+            audio = audio.unsqueeze(0)
+
+        # # Compute Mel-spectrogram
+        # mel_spec = librosa.feature.melspectrogram(
+        #     y=audio,
+        #     sr=sample_rate,
+        #     n_fft=self.n_fft,
+        #     hop_length=self.hop_length,
+        #     n_mels=self.n_mels
+        # )
+        # mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
+
+        # Compute Mel-spectrogram and convert to dB
+        mel_spec = self.mel_transform(audio)  # (1, n_mels, time)
+        mel_spec_db = self.db_transform(mel_spec)  # (1, n_mels, time)
+
+        # Normalize to [0, 1]
         mel_norm = (mel_spec_db + 80) / 80  # from [-80, 0] → [0, 1]
 
-        # Convert to torch tensors
-        melnorm_tensor = torch.tensor(mel_norm, dtype=torch.float32)
+        # Remove channel dimension for consistency with your collate_fn
+        mel_norm = mel_norm.squeeze(0)  # (n_mels, time)
+
         label_tensor = torch.tensor(label, dtype=torch.long)
-        return melnorm_tensor, label_tensor
+
+        # # normalize mel data
+        # mel_norm = (mel_spec_db + 80) / 80  # from [-80, 0] → [0, 1]
+
+        # # Convert to torch tensors
+        # melnorm_tensor = torch.tensor(mel_norm, dtype=torch.float32)
+        # label_tensor = torch.tensor(label, dtype=torch.long)
+        return mel_norm, label_tensor
 
 # Training loop with total loss and accuracy for train and test
 def evaluate(model, dataloader, criterion):
@@ -290,9 +323,9 @@ if __name__ == "__main__":
     num_timesteps = 14004 # length of timestamps or t
     num_classes = 10
     image_width = 800
-    batch_size = 32
+    batch_size = 64
     epochs = 1
-    lr = 1e-3
+    lr = 1e-4
     is_there_trained_weight = False
     save_model_file = "mel_cnn_model4.pt"
     save_dir = "./trained_model"
@@ -307,32 +340,45 @@ if __name__ == "__main__":
     val_ds = temp_ds["train"]
     test_ds = temp_ds["test"]
 
+    # Get sample rate from the first sample
+    sample_rate = train_ds[0]["audio"]["sampling_rate"]
+    print("Sample rate:", sample_rate)
+
     # Optionally, repackage as a DatasetDict
     ds_splits = {"train": train_ds, "val": val_ds, "test": test_ds}
 
     n_fft = 2048
     hop_length = 512
     n_mels = 64
+    num_workers = 8
 
-    max_train_ds = calc_max_len(n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, tmp_ds=train_ds)
-    max_val_ds = calc_max_len(n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, tmp_ds=val_ds)
-    max_test_ds = calc_max_len(n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, tmp_ds=test_ds)
+    print('I am checking max len before organsing data')
+
+    max_train_ds = 1501
+    # max_train_ds = calc_max_len(n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, tmp_ds=train_ds)
+    # # max_val_ds = calc_max_len(n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, tmp_ds=val_ds)
+    # # max_test_ds = calc_max_len(n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, tmp_ds=test_ds)
+
+    print('I am ready for data loader')
 
     # Create DataLoaders
     train_loader = DataLoader(
-        MelSpectrogramDataset(train_ds, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, train=True), 
+        MelSpectrogramDataset(train_ds, sample_rate=sample_rate, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, train=True), 
         batch_size=batch_size, shuffle=True, 
+        num_workers=num_workers, 
         collate_fn=lambda batch: collate_fn_pad_mel_to_max(batch, max_train_ds)
         )
     val_loader = DataLoader(
-        MelSpectrogramDataset(val_ds, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, train=False), 
+        MelSpectrogramDataset(val_ds, sample_rate=sample_rate, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, train=False), 
         batch_size=batch_size, shuffle=False, 
-        collate_fn=lambda batch: collate_fn_pad_mel_to_max(batch, max_val_ds)
+        num_workers=num_workers, 
+        collate_fn=lambda batch: collate_fn_pad_mel_to_max(batch, max_train_ds)
         )
     test_loader = DataLoader(
-        MelSpectrogramDataset(test_ds, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, train=False), 
+        MelSpectrogramDataset(test_ds, sample_rate=sample_rate, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, train=False), 
         batch_size=batch_size, shuffle=False, 
-        collate_fn=lambda batch: collate_fn_pad_mel_to_max(batch, max_test_ds)
+        num_workers=num_workers, 
+        collate_fn=lambda batch: collate_fn_pad_mel_to_max(batch, max_train_ds)
         )
 
     # Set device
@@ -417,6 +463,10 @@ if __name__ == "__main__":
             "epoch": epoch + 1
         })
         print(f"Epoch {epoch+1}, Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+
+        print("saving trained model weights")
+        save_model_locally(model, save_dir=save_dir, f_name=save_model_file)
+        push_model_to_hf(save_dir=save_dir, repo_id=hf_repo)
 
         # if epoch == 0:
         #     print("saving trained model weights")
