@@ -155,6 +155,12 @@ def push_model_to_hf(save_dir="./trained_model", repo_id="hiki-t/enc_dec_audio",
     )
     print(f"Model pushed to Hugging Face Hub: {repo_id} (folder: {save_dir} -> {path_in_repo if path_in_repo else '/'})")
 
+def load_hf_weights(model, repo_id="hiki-t/enc_dec_audio", filename="audio_cnn_model.pt"):
+    # Download the weights file from the repo
+    weights_path = hf_hub_download(repo_id=repo_id, filename=filename)
+    # Load the weights
+    model.load_state_dict(torch.load(weights_path, weights_only=True))
+
 # Example usage (replace with real data loading)
 if __name__ == "__main__":
     # Dummy data: 100 samples, 1 channel, 16000 timesteps (e.g., 1 sec at 16kHz)
@@ -164,6 +170,7 @@ if __name__ == "__main__":
     image_width = 800
     batch_size = 32
     epochs = 1
+    is_there_trained_weight = True
 
     ds = load_dataset("danavery/urbansound8K")
 
@@ -187,6 +194,12 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     model = AudioCNN(num_classes=num_classes, input_channels=1, time_dim=num_timesteps, image_width=image_width)
+    if is_there_trained_weight:
+        print("loading trained weights from huggingface")
+        load_hf_weights(model, repo_id="hiki-t/enc_dec_audio", filename="audio_cnn_model.pt")
+    else:
+        print("no trained weights, start from scratch")
+
     model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
