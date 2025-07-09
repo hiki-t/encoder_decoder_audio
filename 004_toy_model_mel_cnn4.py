@@ -20,7 +20,7 @@ def random_time_shift(audio, shift_max=0.2):
     augmented = np.roll(audio, shift)
     return augmented
 
-def random_time_shift_torch(audio, shift_max=0.2):
+def random_time_shift_torch(audio, shift_max=0.03):
     shift = int(audio.shape[-1] * shift_max * np.random.uniform(-1, 1))
     return torch.roll(audio, shifts=shift, dims=-1)
 
@@ -29,7 +29,7 @@ def add_noise(audio, noise_level=0.005):
     augmented = audio + noise_level * noise
     return augmented
 
-def add_noise_torch(audio, noise_level=0.005):
+def add_noise_torch(audio, noise_level=0.002):
     noise = torch.randn_like(audio)
     return audio + noise_level * noise
 
@@ -297,7 +297,7 @@ def load_hf_weights(model, repo_id="hiki-t/enc_dec_audio", filename="audio_cnn_m
     # Load the weights
     model.load_state_dict(torch.load(weights_path, weights_only=True))
 
-def mixup_data(x, y, alpha=0.2):
+def mixup_data(x, y, alpha=0.1):
     '''Returns mixed inputs, pairs of targets, and lambda'''
     if alpha > 0:
         lam = np.random.beta(alpha, alpha)
@@ -311,8 +311,8 @@ def mixup_data(x, y, alpha=0.2):
 
 # Compose SpecAugment transforms (define this ONCE, outside the loop)
 spec_augment = torch.nn.Sequential(
-    torchaudio.transforms.FrequencyMasking(freq_mask_param=15),
-    torchaudio.transforms.TimeMasking(time_mask_param=35)
+    torchaudio.transforms.FrequencyMasking(freq_mask_param=3),
+    torchaudio.transforms.TimeMasking(time_mask_param=3)
 )
 
 def calc_max_len(n_fft=2048, hop_length=512, n_mels=128, tmp_ds=None):
@@ -346,10 +346,10 @@ if __name__ == "__main__":
     num_classes = 10
     image_width = 800
     batch_size = 64
-    epochs = 1
+    epochs = 10
     lr = 1e-4
-    is_there_trained_weight = False
-    save_model_file = "mel_cnn_model4.pt"
+    is_there_trained_weight = True
+    save_model_file = "mel_cnn_model5.pt"
     save_dir = "./trained_model"
     hf_repo = "hiki-t/enc_dec_audio"
 
@@ -371,7 +371,7 @@ if __name__ == "__main__":
 
     n_fft = 2048
     hop_length = 512
-    n_mels = 64
+    n_mels = 128
     num_workers = 8
 
     print('I am checking max len before organsing data')
@@ -417,7 +417,7 @@ if __name__ == "__main__":
     model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     # Initialize wandb
     wandb.init(
@@ -446,13 +446,13 @@ if __name__ == "__main__":
             # 1. Apply SpecAugment (per sample) # Increases sample diversity
             batch_X = spec_augment(batch_X)
             
-            # 2. Apply Mixup (per batch) # Mixes augmented samples
-            batch_X, targets_a, targets_b, lam = mixup_data(batch_X, batch_y, alpha=0.2)
+            # # 2. Apply Mixup (per batch) # Mixes augmented samples
+            # batch_X, targets_a, targets_b, lam = mixup_data(batch_X, batch_y, alpha=0.05)
 
             optimizer.zero_grad()
             outputs = model(batch_X)
-            loss = lam * criterion(outputs, targets_a) + (1 - lam) * criterion(outputs, targets_b)
-            # loss = criterion(outputs, batch_y)
+            # loss = lam * criterion(outputs, targets_a) + (1 - lam) * criterion(outputs, targets_b)
+            loss = criterion(outputs, batch_y)
             loss.backward()
             optimizer.step()
             train_loss += loss.item() * batch_X.size(0)
@@ -473,8 +473,8 @@ if __name__ == "__main__":
         # Validation (use val_loader instead of test_loader for validation metrics)
         val_loss, val_acc = evaluate(model, val_loader, criterion)
 
-        # In your training loop, after validation:
-        scheduler.step(val_loss)
+        # # In your training loop, after validation:
+        # scheduler.step(val_loss)
 
         # Log epoch-wise metrics to wandb
         wandb.log({
